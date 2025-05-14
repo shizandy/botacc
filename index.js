@@ -1,16 +1,19 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const app = express();
 
 // For parsing JSON body
 app.use(express.json());
 // Enable CORS for API requests
 app.use(cors());
+// Serve static files (CSS, JS)
+app.use(express.static(__dirname));
 
 // In-memory database (you might want to use a real database later)
 const botInstances = {};
-const MASTER_TOKEN = process.env.MASTER_TOKEN || 'andyy';
-const ADMIN_KEY = process.env.ADMIN_KEY || 'andyy';
+const MASTER_TOKEN = process.env.MASTER_TOKEN || 'your-default-secret-token';
+const ADMIN_KEY = process.env.ADMIN_KEY || 'your-admin-secret';
 
 // Home route for checking if server is online
 app.get('/', (req, res) => {
@@ -172,144 +175,9 @@ app.delete('/api/admin/instances/:instanceId', (req, res) => {
   });
 });
 
-// Simple admin web interface (optional, can be built more robustly later)
+// Serve the admin dashboard
 app.get('/admin', (req, res) => {
-  res.send(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Bot Control Panel</title>
-      <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .header { text-align: center; margin-bottom: 20px; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; }
-        tr:hover { background-color: #f5f5f5; }
-        .actions { display: flex; gap: 10px; }
-        button { cursor: pointer; padding: 5px 10px; }
-        .authorize { background-color: #4CAF50; color: white; border: none; }
-        .revoke { background-color: #f44336; color: white; border: none; }
-        .delete { background-color: #ff9800; color: white; border: none; }
-        .refresh { margin-bottom: 10px; }
-        #adminKey { margin-bottom: 10px; width: 300px; padding: 5px; }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>Bot Control Panel</h1>
-        </div>
-        
-        <div>
-          <input type="password" id="adminKey" placeholder="Enter Admin Key" />
-          <button onclick="loadInstances()" class="refresh">Load Instances</button>
-        </div>
-        
-        <div id="instanceList">
-          <p>Enter your admin key and click "Load Instances" to view bot instances.</p>
-        </div>
-      </div>
-      
-      <script>
-        function loadInstances() {
-          const adminKey = document.getElementById('adminKey').value;
-          if (!adminKey) {
-            alert('Please enter the admin key');
-            return;
-          }
-          
-          fetch(\`/api/admin/instances?adminKey=\${adminKey}\`)
-            .then(response => response.json())
-            .then(data => {
-              if (!data.success) {
-                alert('Error: ' + data.message);
-                return;
-              }
-              
-              const instances = data.instances;
-              let html = '<table><tr><th>Instance ID</th><th>User ID</th><th>Device</th><th>Status</th><th>Last Active</th><th>Actions</th></tr>';
-              
-              for (const id in instances) {
-                const instance = instances[id];
-                html += \`
-                  <tr>
-                    <td>\${id}</td>
-                    <td>\${instance.userId}</td>
-                    <td>\${instance.deviceInfo || 'Unknown'}</td>
-                    <td>\${instance.authorized ? 'Authorized' : 'Revoked'}</td>
-                    <td>\${new Date(instance.lastActive).toLocaleString()}</td>
-                    <td class="actions">
-                      <button onclick="authorizeInstance('\${id}', true)" class="authorize">Authorize</button>
-                      <button onclick="authorizeInstance('\${id}', false)" class="revoke">Revoke</button>
-                      <button onclick="deleteInstance('\${id}')" class="delete">Delete</button>
-                    </td>
-                  </tr>
-                \`;
-              }
-              
-              html += '</table>';
-              document.getElementById('instanceList').innerHTML = html;
-            })
-            .catch(error => alert('Error loading instances: ' + error));
-        }
-        
-        function authorizeInstance(instanceId, authorized) {
-          const adminKey = document.getElementById('adminKey').value;
-          if (!adminKey) {
-            alert('Please enter the admin key');
-            return;
-          }
-          
-          fetch('/api/admin/authorize', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ adminKey, instanceId, authorized })
-          })
-            .then(response => response.json())
-            .then(data => {
-              if (data.success) {
-                alert(data.message);
-                loadInstances();
-              } else {
-                alert('Error: ' + data.message);
-              }
-            })
-            .catch(error => alert('Error: ' + error));
-        }
-        
-        function deleteInstance(instanceId) {
-          const adminKey = document.getElementById('adminKey').value;
-          if (!adminKey) {
-            alert('Please enter the admin key');
-            return;
-          }
-          
-          if (!confirm('Are you sure you want to delete this instance?')) {
-            return;
-          }
-          
-          fetch(\`/api/admin/instances/\${instanceId}\`, {
-            method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ adminKey })
-          })
-            .then(response => response.json())
-            .then(data => {
-              if (data.success) {
-                alert(data.message);
-                loadInstances();
-              } else {
-                alert('Error: ' + data.message);
-              }
-            })
-            .catch(error => alert('Error: ' + error));
-        }
-      </script>
-    </body>
-    </html>
-  `);
+  res.sendFile(path.join(__dirname, 'admin.html'));
 });
 
 // Start the server

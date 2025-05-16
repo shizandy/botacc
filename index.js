@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(cors());
 
 // Configuration MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongo:YbtEJgyPWxZPGFqfKjHhvHjZLBBbIQnl@shortline.proxy.rlwy.net:56805';
 const DB_NAME = 'bot_auth';
 const COLLECTION_NAME = 'auth_instances';
 

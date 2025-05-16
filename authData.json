@@ -1,1 +1,12 @@
-
+[
+  {
+    "botId": "levantermax",
+    "phoneNumber": "50931312968",
+    "instanceId": "52599299-7816-4d04-bc5c-e018cc3bb140",
+    "deviceInfo": {},
+    "status": "approved",
+    "createdAt": "2025-05-16T18:50:17.000Z",
+    "approvedAt": "2025-05-16T18:50:17.000Z",
+    "lastPing": "2025-05-16T18:50:17.000Z"
+  }
+]

@@ -17,7 +17,7 @@ const defaultAuthData = [
   {
     "botId": "levantermax",
     "phoneNumber": "50931312968",
-    "instanceId": "pre-approved-instance-12345",
+    "instanceId": "52599299-7816-4d04-bc5c-e018cc3bb140",
     "deviceInfo": {},
     "status": "approved",
     "createdAt": "2025-05-16T19:22:43.000Z",

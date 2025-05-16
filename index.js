@@ -10,33 +10,31 @@ app.use(express.json());
 app.use(cors());
 
 // Configuration MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://mongo:YbtEJgyPWxZPGFqfKjHhvHjZLBBbIQnl@shortline.proxy.rlwy.net:56805';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority';
 const DB_NAME = 'bot_auth';
 const COLLECTION_NAME = 'auth_instances';
 
 let dbClient = null;
 let authCollection = null;
 
-// Fonction pour se connecter à MongoDB
+// Fonction pour se connecter à MongoDB avec meilleure gestion d'erreurs
 async function connectToMongoDB() {
-  if (dbClient && dbClient.isConnected()) {
+  // Si déjà connecté, ne rien faire
+  if (dbClient && dbClient.topology && dbClient.topology.isConnected()) {
     return;
   }
 
   try {
-    dbClient = new MongoClient(MONGODB_URI, {
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    });
-    
+    console.log('Tentative de connexion à MongoDB Atlas...');
+    dbClient = new MongoClient(MONGODB_URI);
     await dbClient.connect();
-    console.log('Connecté à MongoDB Atlas');
+    console.log('Connecté avec succès à MongoDB Atlas');
     
     const db = dbClient.db(DB_NAME);
     authCollection = db.collection(COLLECTION_NAME);
     
-    // Créer un index pour les recherches efficaces
-    await authCollection.createIndex({ botId: 1, phoneNumber: 1, instanceId: 1 }, { unique: true });
+    // Créer un index pour les recherches efficaces si nécessaire
+    await authCollection.createIndex({ botId: 1, phoneNumber: 1, instanceId: 1 });
     
     // Vérification du nombre d'instances
     const count = await authCollection.countDocuments();
@@ -51,18 +49,18 @@ async function connectToMongoDB() {
           "instanceId": "pre-approved-instance-12345",
           "deviceInfo": {},
           "status": "approved",
-          "createdAt": "2025-05-16T19:43:23.000Z",
-          "approvedAt": "2025-05-16T19:43:23.000Z",
-          "lastPing": "2025-05-16T19:43:23.000Z",
+          "createdAt": "2025-05-16T20:13:32.000Z",
+          "approvedAt": "2025-05-16T20:13:32.000Z",
+          "lastPing": "2025-05-16T20:13:32.000Z",
           "expiresAt": null
         }
       ];
       
-      await authCollection.insertMany(defaultAuthData);
-      console.log('Données par défaut insérées dans MongoDB');
+      const result = await authCollection.insertMany(defaultAuthData);
+      console.log(`${result.insertedCount} données par défaut insérées dans MongoDB`);
     }
   } catch (error) {
-    console.error('Erreur de connexion à MongoDB:', error);
+    console.error('Erreur détaillée de connexion à MongoDB:', error);
     throw error;
   }
 }
@@ -85,7 +83,11 @@ const ensureDbConnected = async (req, res, next) => {
     next();
   } catch (error) {
     console.error('Erreur de connexion à la base de données:', error);
-    res.status(500).json({ success: false, message: 'Erreur de connexion à la base de données' });
+    res.status(500).json({ 
+      success: false, 
+      message: 'Erreur de connexion à la base de données',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined 
+    });
   }
 };
 
@@ -94,6 +96,7 @@ app.use(ensureDbConnected);
 
 // Route pour valider si un bot est autorisé à s'exécuter
 app.post('/api/validate', async (req, res) => {
+  console.log('Requête de validation reçue:', req.body);
   const { botId, phoneNumber, instanceId } = req.body;
   
   if (!botId || !phoneNumber) {
@@ -104,6 +107,8 @@ app.post('/api/validate', async (req, res) => {
   }
   
   try {
+    console.log(`Recherche d'autorisation pour botId=${botId}, phoneNumber=${phoneNumber}, instanceId=${instanceId}`);
+    
     // Recherche de l'autorisation
     const auth = await authCollection.findOne({
       botId: botId,
@@ -112,14 +117,18 @@ app.post('/api/validate', async (req, res) => {
     });
     
     if (!auth) {
+      console.log('Aucune autorisation trouvée');
       return res.status(403).json({ 
         success: false, 
         message: 'Bot non autorisé à s\'exécuter'
       });
     }
     
+    console.log('Autorisation trouvée:', auth);
+    
     // Vérification de l'expiration
     if (auth.expiresAt && new Date(auth.expiresAt) < new Date()) {
+      console.log('Autorisation expirée');
       return res.status(403).json({ 
         success: false, 
         message: 'Autorisation expirée'
@@ -132,19 +141,26 @@ app.post('/api/validate', async (req, res) => {
       { $set: { lastPing: new Date().toISOString() } }
     );
     
+    console.log('Validation réussie, lastPing mis à jour');
+    
     return res.json({ 
       success: true, 
       message: 'Bot autorisé', 
       expiresAt: auth.expiresAt
     });
   } catch (error) {
-    console.error('Erreur lors de la validation:', error);
-    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    console.error('Erreur détaillée lors de la validation:', error);
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Erreur serveur',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // Route pour enregistrer un nouveau bot (inscription initiale)
 app.post('/api/register', async (req, res) => {
+  console.log('Requête d\'enregistrement reçue:', req.body);
   const { botId, phoneNumber, deviceInfo } = req.body;
   
   if (!botId || !phoneNumber) {
@@ -157,6 +173,7 @@ app.post('/api/register', async (req, res) => {
   try {
     // Génération d'un ID d'instance unique
     const instanceId = uuidv4();
+    console.log(`Nouvel instanceId généré: ${instanceId}`);
     
     // Ajout à la liste en attente d'approbation
     const pendingAuth = {
@@ -170,6 +187,7 @@ app.post('/api/register', async (req, res) => {
     };
     
     await authCollection.insertOne(pendingAuth);
+    console.log('Instance enregistrée avec succès');
     
     return res.json({ 
       success: true, 
@@ -178,12 +196,17 @@ app.post('/api/register', async (req, res) => {
     });
   } catch (error) {
     console.error('Erreur lors de l\'enregistrement:', error);
-    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Erreur serveur',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined 
+    });
   }
 });
 
 // Route pour approuver une demande d'autorisation (admin seulement)
 app.post('/api/authorize', checkAdminKey, async (req, res) => {
+  console.log('Requête d\'autorisation reçue:', req.body);
   const { instanceId, expiresInDays } = req.body;
   
   if (!instanceId) {
@@ -210,6 +233,7 @@ app.post('/api/authorize', checkAdminKey, async (req, res) => {
       const expirationDate = new Date();
       expirationDate.setDate(expirationDate.getDate() + parseInt(expiresInDays));
       expiresAt = expirationDate.toISOString();
+      console.log(`Date d'expiration définie: ${expiresAt}`);
     }
     
     // Mise à jour du statut
@@ -225,6 +249,7 @@ app.post('/api/authorize', checkAdminKey, async (req, res) => {
     );
     
     const updatedAuth = await authCollection.findOne({ instanceId: instanceId });
+    console.log('Instance approuvée avec succès');
     
     return res.json({ 
       success: true, 
@@ -233,12 +258,17 @@ app.post('/api/authorize', checkAdminKey, async (req, res) => {
     });
   } catch (error) {
     console.error('Erreur lors de l\'autorisation:', error);
-    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Erreur serveur',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
 // Route pour révoquer une autorisation (admin seulement)
 app.post('/api/revoke', checkAdminKey, async (req, res) => {
+  console.log('Requête de révocation reçue:', req.body);
   const { instanceId } = req.body;
   
   if (!instanceId) {
@@ -270,13 +300,19 @@ app.post('/api/revoke', checkAdminKey, async (req, res) => {
       }
     );
     
+    console.log('Instance révoquée avec succès');
+    
     return res.json({ 
       success: true, 
       message: 'Autorisation révoquée avec succès' 
     });
   } catch (error) {
     console.error('Erreur lors de la révocation:', error);
-    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Erreur serveur',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -284,6 +320,7 @@ app.post('/api/revoke', checkAdminKey, async (req, res) => {
 app.get('/api/instances', checkAdminKey, async (req, res) => {
   try {
     const instances = await authCollection.find({}).toArray();
+    console.log(`${instances.length} instances récupérées`);
     
     return res.json({ 
       success: true, 
@@ -291,7 +328,11 @@ app.get('/api/instances', checkAdminKey, async (req, res) => {
     });
   } catch (error) {
     console.error('Erreur lors de la récupération des instances:', error);
-    return res.status(500).json({ success: false, message: 'Erreur serveur' });
+    return res.status(500).json({ 
+      success: false, 
+      message: 'Erreur serveur',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
   }
 });
 
@@ -299,13 +340,15 @@ app.get('/api/instances', checkAdminKey, async (req, res) => {
 app.get('/api/health', async (req, res) => {
   try {
     const instanceCount = await authCollection.countDocuments();
+    console.log(`Vérification de santé: ${instanceCount} instances dans la base de données`);
     
     return res.json({ 
       success: true, 
       message: 'Serveur d\'authentification en ligne',
       timestamp: new Date().toISOString(),
       instanceCount: instanceCount,
-      database: 'MongoDB Atlas'
+      database: 'MongoDB Atlas',
+      version: '1.1.0'
     });
   } catch (error) {
     console.error('Erreur lors de la vérification de santé:', error);
@@ -319,7 +362,24 @@ app.get('/api/health', async (req, res) => {
 
 // Route home
 app.get('/', (req, res) => {
-  res.send('Serveur d\'authentification Pterodactyl actif avec MongoDB Atlas');
+  res.send(`
+    <html>
+      <head>
+        <title>Serveur d'authentification Pterodactyl</title>
+        <style>
+          body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+          h1 { color: #333; }
+          .status { color: green; }
+        </style>
+      </head>
+      <body>
+        <h1>Serveur d'authentification Pterodactyl</h1>
+        <p>Status: <span class="status">Actif</span></p>
+        <p>Système d'authentification pour bots basé sur MongoDB Atlas</p>
+        <p>Date: ${new Date().toISOString()}</p>
+      </body>
+    </html>
+  `);
 });
 
 // Port pour les tests locaux (Vercel utilisera sa propre configuration)

@@ -1,5 +1,5 @@
-// Serveur d'authentification pour les bots Pterodactyl
-const express = require('express');
+// Système d'authentification par serveur central
+const express = require("express");
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
 const { MongoClient } = require('mongodb');
@@ -10,7 +10,7 @@ app.use(express.json());
 app.use(cors());
 
 // Configuration MongoDB
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://maxiiiii:yooo6916@cluster0.qsehi0c.mongodb.net/?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority';
 const DB_NAME = 'bot_auth';
 const COLLECTION_NAME = 'auth_instances';
 
@@ -49,9 +49,9 @@ async function connectToMongoDB() {
           "instanceId": "pre-approved-instance-12345",
           "deviceInfo": {},
           "status": "approved",
-          "createdAt": "2025-05-16T20:13:32.000Z",
-          "approvedAt": "2025-05-16T20:13:32.000Z",
-          "lastPing": "2025-05-16T20:13:32.000Z",
+          "createdAt": "2025-05-17T11:00:40.000Z",
+          "approvedAt": "2025-05-17T11:00:40.000Z",
+          "lastPing": "2025-05-17T11:00:40.000Z",
           "expiresAt": null
         }
       ];
@@ -107,47 +107,79 @@ app.post('/api/validate', async (req, res) => {
   }
   
   try {
-    console.log(`Recherche d'autorisation pour botId=${botId}, phoneNumber=${phoneNumber}, instanceId=${instanceId}`);
+    console.log(`Recherche d'autorisation pour botId=${botId}, phoneNumber=${phoneNumber}`);
     
-    // Recherche de l'autorisation
-    const auth = await authCollection.findOne({
+    // MODIFICATION : D'abord chercher par numéro de téléphone, pas besoin d'instanceId
+    let auth = await authCollection.findOne({
       botId: botId,
       phoneNumber: phoneNumber,
-      instanceId: instanceId
+      status: 'approved' // Cherche seulement les instances approuvées
     });
     
-    if (!auth) {
-      console.log('Aucune autorisation trouvée');
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Bot non autorisé à s\'exécuter'
+    // Si on trouve une instance approuvée avec ce numéro, on l'utilise
+    if (auth) {
+      console.log('Autorisation trouvée par numéro de téléphone:', auth);
+      
+      // Mise à jour du dernier ping
+      await authCollection.updateOne(
+        { _id: auth._id },
+        { $set: { lastPing: new Date().toISOString() } }
+      );
+      
+      // Retourner l'instance existante
+      return res.json({ 
+        success: true, 
+        message: 'Bot autorisé avec instance existante', 
+        expiresAt: auth.expiresAt,
+        instanceId: auth.instanceId // Retourne l'instanceId existant
       });
     }
     
-    console.log('Autorisation trouvée:', auth);
-    
-    // Vérification de l'expiration
-    if (auth.expiresAt && new Date(auth.expiresAt) < new Date()) {
-      console.log('Autorisation expirée');
-      return res.status(403).json({ 
-        success: false, 
-        message: 'Autorisation expirée'
+    // Si aucune instance n'est trouvée par numéro, chercher par instanceId (comportement original)
+    if (instanceId) {
+      auth = await authCollection.findOne({
+        instanceId: instanceId
+      });
+      
+      if (!auth) {
+        console.log('Aucune autorisation trouvée');
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Bot non autorisé à s\'exécuter'
+        });
+      }
+      
+      console.log('Autorisation trouvée par instanceId:', auth);
+      
+      // Vérification de l'expiration
+      if (auth.expiresAt && new Date(auth.expiresAt) < new Date()) {
+        console.log('Autorisation expirée');
+        return res.status(403).json({ 
+          success: false, 
+          message: 'Autorisation expirée'
+        });
+      }
+      
+      // Mise à jour du dernier ping
+      await authCollection.updateOne(
+        { instanceId: instanceId },
+        { $set: { lastPing: new Date().toISOString() } }
+      );
+      
+      console.log('Validation réussie, lastPing mis à jour');
+      
+      return res.json({ 
+        success: true, 
+        message: 'Bot autorisé', 
+        expiresAt: auth.expiresAt
+      });
+    } else {
+      // Si on arrive ici, pas d'instance trouvée ni par numéro ni par instanceId
+      return res.status(403).json({
+        success: false,
+        message: 'Numéro non autorisé et aucun ID d\'instance fourni'
       });
     }
-    
-    // Mise à jour du dernier ping
-    await authCollection.updateOne(
-      { instanceId: instanceId },
-      { $set: { lastPing: new Date().toISOString() } }
-    );
-    
-    console.log('Validation réussie, lastPing mis à jour');
-    
-    return res.json({ 
-      success: true, 
-      message: 'Bot autorisé', 
-      expiresAt: auth.expiresAt
-    });
   } catch (error) {
     console.error('Erreur détaillée lors de la validation:', error);
     return res.status(500).json({ 
@@ -171,6 +203,24 @@ app.post('/api/register', async (req, res) => {
   }
   
   try {
+    // MODIFICATION : Vérifier d'abord si le numéro existe déjà
+    const existingAuth = await authCollection.findOne({
+      botId: botId,
+      phoneNumber: phoneNumber,
+      status: 'approved' // Cherche seulement les instances approuvées
+    });
+    
+    // Si une instance approuvée existe déjà, on la retourne
+    if (existingAuth) {
+      console.log(`Instance approuvée existante trouvée pour le numéro ${phoneNumber}`);
+      return res.json({ 
+        success: true, 
+        message: 'Instance déjà approuvée pour ce numéro',
+        instanceId: existingAuth.instanceId,
+        alreadyApproved: true // Indique que c'est une instance existante
+      });
+    }
+    
     // Génération d'un ID d'instance unique
     const instanceId = uuidv4();
     console.log(`Nouvel instanceId généré: ${instanceId}`);
@@ -348,7 +398,7 @@ app.get('/api/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       instanceCount: instanceCount,
       database: 'MongoDB Atlas',
-      version: '1.1.0'
+      version: '1.2.0'
     });
   } catch (error) {
     console.error('Erreur lors de la vérification de santé:', error);
